@@ -801,10 +801,33 @@ InitializeEncoding(JNIEnv *env, const char *encname)
     String_init_ID = (*env)->GetMethodID(env, strClazz,
                                          "<init>", "([BLjava/lang/String;)V");
     CHECK_NULL(String_init_ID);
+    /* [IKVM] Phase 5 (2026-08-13): real, unmodified upstream unconditionally requires String's own
+     * internal Compact-Strings fields (coder/value) here, used only by the FAST_UTF_8/FAST_8859_1/
+     * FAST_646_US/FAST_CP1252 raw-byte-array fast paths below (getStringUTF8 etc.) - but IKVM's own
+     * java.lang.String is backed directly by cli.System.String, with no such fields at all (confirmed
+     * via a real NoSuchFieldError crash trace: this GetFieldID call previously failed outright, via
+     * CHECK_NULL, the first time InitializeEncoding() was ever invoked against IKVM's own String).
+     * Treated as optional here rather than fatal: if the fields aren't present (IKVM's environment),
+     * fall back to NO_FAST_ENCODING regardless of what encname was requested, so none of the fast
+     * paths below are ever taken - only the generic, method-based getStringBytes()/newSizedStringJava()
+     * paths run, which only need String_getBytes_ID/String_init_ID above (both real, ordinary,
+     * always-present Java methods, fully compatible with IKVM's String). Any pending exception from
+     * the failed GetFieldID calls is cleared before continuing, matching this fallback's own
+     * "not available, use the generic path" semantics rather than a real error. */
     String_coder_ID = (*env)->GetFieldID(env, strClazz, "coder", "B");
-    CHECK_NULL(String_coder_ID);
+    if (String_coder_ID == NULL) {
+        (*env)->ExceptionClear(env);
+        fastEncoding = NO_FAST_ENCODING;
+        String_value_ID = NULL;
+        return;
+    }
     String_value_ID = (*env)->GetFieldID(env, strClazz, "value", "[B");
-    CHECK_NULL(String_value_ID);
+    if (String_value_ID == NULL) {
+        (*env)->ExceptionClear(env);
+        fastEncoding = NO_FAST_ENCODING;
+        String_coder_ID = NULL;
+        return;
+    }
 }
 
 JNIEXPORT jstring JNICALL
