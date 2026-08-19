@@ -3626,8 +3626,15 @@ UINT AwtComponent::WindowsKeyToJavaChar(UINT wkey, UINT modifiers, TransOps ops,
         wChar[0] = shiftIsDown ? ch : tolower(ch);
     } else {
         UINT scancode = ::MapVirtualKey(wkey, 0);
+        // [IKVM] Phase 3c (2026-08-15): ToUnicodeEx's LPWSTR parameter and WORD wChar[2] are both
+        // 16-bit unsigned on Windows (WORD == wchar_t in size/representation) - MSVC accepts this
+        // implicit pointer conversion leniently; clang's C++ strict-aliasing type checking rejects it
+        // as ill-formed (no -Wno- flag applies, since C++ pointer conversions between unrelated pointee
+        // types are a hard error, not a warned-about non-conformance, unlike the C-mode
+        // -Wincompatible-pointer-types cases already handled elsewhere in this migration via compiler
+        // flags). A behavior-preserving reinterpret_cast is the narrowest real fix.
         converted = ::ToUnicodeEx(wkey, scancode, keyboardState,
-                                              wChar, 2, 0, GetKeyboardLayout());
+                                              reinterpret_cast<LPWSTR>(wChar), 2, 0, GetKeyboardLayout());
     }
 
     UINT translation;

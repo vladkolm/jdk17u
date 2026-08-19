@@ -336,8 +336,25 @@ AwtToolkit::AwtToolkit() {
     m_displayChanged = FALSE;
     m_embedderProcessID = 0;
 
-    // XXX: keyboard mapping should really be moved out of AwtComponent
-    AwtComponent::InitDynamicKeyMapTable();
+    // [IKVM] Phase 5 (2026-08-19): this call is moved to AwtToolkit::Initialize() below, for the same
+    // reason ComCtl32Util::GetInstance().InitLibraries() was already moved there by real upstream itself
+    // (see that call site's own comment: "moved here from AwtToolkit constructor... bug 6480630").
+    // InitDynamicKeyMapTable -> BuildDynamicKeyMapTable calls real Win32 keyboard-layout APIs
+    // (GetKeyboardLayout, MapVirtualKeyEx, a ToAscii/ToUnicode-based mapping loop), which are documented
+    // to transitively LoadLibrary locale/IME support DLLs on first use - calling anything that can
+    // transitively LoadLibrary from within a global C++ object's own constructor (which runs during the
+    // DLL's static-initialization phase, before DllMain itself executes, while the OS loader lock is
+    // still held) is a well-known, explicitly-documented Windows anti-pattern that can deadlock or
+    // corrupt loader state. Root-caused via a real, reproducible native crash the first time this code
+    // path was ever exercised in this migration (java.awt.Toolkit's own <clinit> failing to load awt.dll
+    // at all: WER logged a hard access violation with no debugger attached, and a real delay-load
+    // failure - a different, but related, symptom - when run under a debugger, both disappearing once
+    // this call was moved past DllMain). Real, unmodified upstream never hit this because a normal
+    // java.exe process has typically already loaded whatever keyboard-layout/IME support it needs by the
+    // time awt.dll is lazily loaded deep into a running JVM's lifecycle; this migration's own boot
+    // sequence loads awt.dll much earlier relative to process startup, removing that accidental head
+    // start. InitDynamicKeyMapTable's own internal `static BOOL kbdinited` guard makes it safe to call
+    // from here instead - confirmed via a real grep that AwtToolkit's own constructor is its only caller.
 
     // initialize kb state array
     ::GetKeyboardState(m_lastKeyboardState);
@@ -616,6 +633,11 @@ BOOL AwtToolkit::Initialize(BOOL localPump) {
     // there led to the bug 6480630: there could be a situation when
     // ComCtl32Util was constructed but not disposed
     ComCtl32Util::GetInstance().InitLibraries();
+
+    // [IKVM] Phase 5 (2026-08-19): also moved here from the AwtToolkit constructor, for the same
+    // loader-lock-safety reason as ComCtl32Util::InitLibraries() just above - see that call's own
+    // constructor-side comment for the full explanation.
+    AwtComponent::InitDynamicKeyMapTable();
 
     if (!localPump) {
         // if preload thread was run, terminate it

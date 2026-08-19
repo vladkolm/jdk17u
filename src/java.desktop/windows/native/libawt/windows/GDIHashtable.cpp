@@ -26,7 +26,12 @@
 #include "GDIHashtable.h"
 #include "awt_GDIObject.h"
 
-GDIHashtable::BatchDestructionManager GDIHashtable::manager;
+// [IKVM] Phase 5 (2026-08-19): construct-on-first-use, see the declaration
+// in GDIHashtable.h for why this is no longer a plain static data member.
+GDIHashtable::BatchDestructionManager& GDIHashtable::manager() {
+    static BatchDestructionManager instance;
+    return instance;
+}
 
 /*
  * The order of monitor entrance is BatchDestructionManager->List->Hashtable.
@@ -35,12 +40,12 @@ GDIHashtable::BatchDestructionManager GDIHashtable::manager;
  */
 
 void* GDIHashtable::put(void* key, void* value) {
-    manager.decrementCounter();
+    manager().decrementCounter();
     return Hashtable::put(key, value);
 }
 
 void GDIHashtable::release(void* key) {
-    if (!manager.isBatchingEnabled()) {
+    if (!manager().isBatchingEnabled()) {
         void* value = remove(key);
         DASSERT(value != NULL);
         m_deleteProc(value);

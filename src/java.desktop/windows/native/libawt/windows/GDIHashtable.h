@@ -162,11 +162,11 @@ class GDIHashtable : public Hashtable {
     GDIHashtable(const char* name, void (*deleteProc)(void*) = NULL,
                    int initialCapacity = 29, float loadFactor = 0.75) :
         Hashtable(name, deleteProc, initialCapacity, loadFactor) {
-        manager.add(this);
+        manager().add(this);
     }
 
     ~GDIHashtable() {
-        manager.remove(this);
+        manager().remove(this);
     }
 
     /**
@@ -192,13 +192,24 @@ class GDIHashtable : public Hashtable {
     /**
      * Flushes all existing GDIHashtable instances.
      */
-    INLINE static void flushAll() { manager.flushAll(); }
+    INLINE static void flushAll() { manager().flushAll(); }
 
-    INLINE CriticalSection& getManagerLock() { return manager.getLock(); }
+    INLINE CriticalSection& getManagerLock() { return manager().getLock(); }
 
  private:
 
-    static BatchDestructionManager manager;
+    // [IKVM] Phase 5 (2026-08-19): was a plain eagerly-constructed static
+    // data member. C++ gives no ordering guarantee between the static
+    // initializers of different translation units, so a GDIHashtable
+    // instance defined in another .cpp file (e.g. AwtBrush::cache) could be
+    // constructed - and call into manager.add(this) - before this object's
+    // own constructor (and its CriticalSection sub-object's constructor,
+    // which sets up its vtable) had run, crashing with a null vtable-pointer
+    // call. MSVC's link order happened to satisfy the ordering by luck;
+    // clang/lld's does not. Converted to a function-local static, which C++
+    // guarantees is initialized on first use rather than at a link-order-
+    // dependent point during DLL_PROCESS_ATTACH.
+    static BatchDestructionManager& manager();
 
 };
 
